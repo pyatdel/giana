@@ -1,0 +1,7 @@
+{
+    "python.experiments.optOutFrom": [
+
+    ],
+    "github.copilot.chat.localeOverride": "ko",
+    "typescript.locale": "ko"
+}
