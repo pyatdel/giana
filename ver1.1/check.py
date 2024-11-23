@@ -142,7 +142,7 @@ class ModernDraggableHeaderTreeview(ttk.Treeview):
                     drag_distance = abs(event.x - self.drag_data['start_x'])
                     
                     # 컬럼 너비의 절반 이상 이동했을 때만 위치 변경
-                    min_move = self.column(self.column_order[current_index], "width") // 2
+                    min_move = self.column(self.column_order[target_index], "width") // 2
                     
                     if drag_distance > min_move:
                         # 위치 전환
@@ -254,13 +254,16 @@ class ModernRenameWindow(tk.Toplevel):
         self.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
         
         self.minsize(1200, 700)
-        
         self.configure(bg='#ECF0F1')
         
         self.selected_items = selected_items
         self.path = path
         self.callback = callback
         self.colors = ModernUI.setup_styles()
+
+        # 드롭다운에 사용할 값들 정의
+        self.valid_genres = sorted(list(VALID_GENRES))
+        self.valid_platforms = ['DLsite', 'VNdb', 'Getchu', 'Fanza', 'Steam']
 
         self.name_parts = ['creator', 'unique_id', 'game_title', 'genre', 'platform']
         self.name_parts_korean = {
@@ -272,17 +275,26 @@ class ModernRenameWindow(tk.Toplevel):
         }
         self.edit_entries = {}
         
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        
         self.create_widgets()
 
     def create_widgets(self):
         main_frame = ttk.Frame(self, style='modern.TFrame')
-        main_frame.pack(fill="both", expand=True, padx=30, pady=30)
+        main_frame.grid(row=0, column=0, sticky="nsew", padx=30, pady=30)
+        
+        main_frame.grid_columnconfigure(1, weight=3)
+        main_frame.grid_rowconfigure(0, weight=1)
 
         left_frame = ttk.Frame(main_frame, style='modern.TFrame')
-        left_frame.pack(side="left", fill="both", expand=True, padx=(0, 15))
-
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 15))
+        
         right_frame = ttk.Frame(main_frame, style='modern.TFrame')
-        right_frame.pack(side="right", fill="both", expand=True)
+        right_frame.grid(row=0, column=1, sticky="nsew")
+        
+        right_frame.grid_rowconfigure(1, weight=1)
+        right_frame.grid_columnconfigure(0, weight=1)
 
         self.create_item_list(left_frame)
         self.create_edit_frame(right_frame)
@@ -291,16 +303,18 @@ class ModernRenameWindow(tk.Toplevel):
 
     def create_item_list(self, parent):
         list_frame = ttk.LabelFrame(parent, text="파일/폴더 목록", style='modern.TLabelframe')
-        list_frame.pack(fill="both", expand=True)
+        list_frame.grid(sticky="nsew")
+        list_frame.grid_rowconfigure(0, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
 
         self.item_tree = ttk.Treeview(list_frame, columns=("Item",), 
                                     show="headings", style='modern.Treeview')
         self.item_tree.heading("Item", text="이름")
-        self.item_tree.pack(side="left", fill="both", expand=True)
+        self.item_tree.grid(row=0, column=0, sticky="nsew")
 
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", 
                                 command=self.item_tree.yview)
-        scrollbar.pack(side="right", fill="y")
+        scrollbar.grid(row=0, column=1, sticky="ns")
         self.item_tree.configure(yscrollcommand=scrollbar.set)
 
         for item in self.selected_items:
@@ -309,24 +323,64 @@ class ModernRenameWindow(tk.Toplevel):
         self.item_tree.bind("<<TreeviewSelect>>", self.on_item_select)
 
     def create_edit_frame(self, parent):
-        edit_frame = ttk.LabelFrame(parent, text="항목 편집", style='modern.TLabelframe')
-        edit_frame.pack(fill="x", pady=(0, 10))
-
-        entry_frame = ttk.Frame(edit_frame, style='modern.TFrame')
-        entry_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-        for part in self.name_parts:
-            ttk.Label(entry_frame, text=f"{self.name_parts_korean[part]}:",
-                     background=self.colors['background'],
-                     font=('Malgun Gothic', 9)).pack(anchor="w", pady=(5, 0))
-            entry = ttk.Entry(entry_frame, style='modern.TEntry')
-            entry.bind('<KeyRelease>', lambda e: self.update_preview_list())
-            entry.pack(fill="x", pady=(0, 5))
+        edit_frame = ttk.Frame(parent, style='modern.TFrame', padding=10)
+        edit_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        
+        # 제목 레이블
+        title_label = ttk.Label(edit_frame, 
+                            text="항목 편집",
+                            font=('Malgun Gothic', 10, 'bold'),
+                            background=self.colors['background'])
+        title_label.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        
+        # 내용을 담을 내부 프레임
+        content_frame = ttk.Frame(edit_frame, style='modern.TFrame')
+        content_frame.grid(row=1, column=0, sticky="ew")
+        content_frame.grid_columnconfigure(1, weight=1)
+        
+        for i, part in enumerate(self.name_parts):
+            # Frame for each row
+            row_frame = ttk.Frame(content_frame, style='modern.TFrame')
+            row_frame.grid(row=i, column=0, columnspan=2, sticky="ew", pady=5)
+            
+            # 레이블
+            label = ttk.Label(
+                row_frame, 
+                text=f"{self.name_parts_korean[part]}:",
+                background=self.colors['background'],
+                font=('Malgun Gothic', 9)
+            )
+            label.grid(row=0, column=0, sticky="w", padx=(0, 10))
+            
+            # Entry 또는 Combobox 생성
+            if part == 'genre':
+                entry = ttk.Combobox(row_frame, 
+                                   values=self.valid_genres,
+                                   font=('Malgun Gothic', 9),
+                                   state="readonly")
+                entry.bind('<<ComboboxSelected>>', lambda e: self.update_preview_list())
+            elif part == 'platform':
+                entry = ttk.Combobox(row_frame, 
+                                   values=self.valid_platforms,
+                                   font=('Malgun Gothic', 9),
+                                   state="readonly")
+                entry.bind('<<ComboboxSelected>>', lambda e: self.update_preview_list())
+            else:
+                entry = tk.Entry(row_frame, font=('Malgun Gothic', 9))
+                entry.configure(background='white')
+                entry.bind('<KeyRelease>', lambda e: self.update_preview_list())
+            
+            entry.grid(row=0, column=1, sticky="ew")
             self.edit_entries[part] = entry
+            
+            row_frame.grid_columnconfigure(1, weight=1)
 
     def create_preview_list(self, parent):
         preview_frame = ttk.LabelFrame(parent, text="미리보기", style='modern.TLabelframe')
-        preview_frame.pack(fill="both", expand=True, pady=(0, 10))
+        preview_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
+        
+        preview_frame.grid_rowconfigure(0, weight=1)
+        preview_frame.grid_columnconfigure(0, weight=1)
 
         self.preview_tree = ModernDraggableHeaderTreeview(
             preview_frame,
@@ -335,7 +389,6 @@ class ModernRenameWindow(tk.Toplevel):
             style='modern.Treeview'
         )
 
-        # Set up headings with Korean text
         column_names = {
             "Creator": "제작자",
             "ID": "고유 ID",
@@ -349,47 +402,91 @@ class ModernRenameWindow(tk.Toplevel):
             self.preview_tree.column(col, width=100)
         
         self.preview_tree.column("Title", width=400)
-
-        self.preview_tree.pack(side="left", fill="both", expand=True)
+        self.preview_tree.grid(row=0, column=0, sticky="nsew")
 
         scrollbar = ttk.Scrollbar(preview_frame, orient="vertical",
                                command=self.preview_tree.yview)
-        scrollbar.pack(side="right", fill="y")
+        scrollbar.grid(row=0, column=1, sticky="ns")
         self.preview_tree.configure(yscrollcommand=scrollbar.set)
         
         self.preview_tree.bind('<<TreeviewColumnReordered>>', self.on_column_reorder)
 
     def create_button_frame(self, parent):
         button_frame = ttk.Frame(parent, style='modern.TFrame')
-        button_frame.pack(fill="x", pady=(0, 10))
+        button_frame.grid(row=2, column=0, sticky="ew", pady=(0, 10))
 
-        ttk.Button(button_frame, text="변경 적용",
-                 style='modern.TButton',
-                 command=self.apply_changes).pack(side="left")
+        ttk.Button(button_frame, 
+                  text="변경 적용",
+                  style='modern.TButton',
+                  command=self.apply_changes).grid(row=0, column=0, sticky="w")
 
     def on_item_select(self, event):
         selected_items = self.item_tree.selection()
-        if len(selected_items) == 1:
+        if len(selected_items) > 1:
+            # 다중 선택 시
+            for part in self.name_parts:
+                if part in ['genre', 'platform']:
+                    self.edit_entries[part].set('')  # Combobox의 경우 set() 메서드 사용
+                else:
+                    self.edit_entries[part].delete(0, tk.END)
+                    self.edit_entries[part].insert(0, "(다중 선택)")
+
+        elif len(selected_items) == 1:
+            # 단일 선택 시
             item = self.item_tree.item(selected_items[0])['values'][0]
             is_valid, info = validate_name(item)
             if is_valid:
                 for part in self.name_parts:
-                    self.edit_entries[part].config(state="normal")
-                    self.edit_entries[part].delete(0, tk.END)
-                    self.edit_entries[part].insert(0, info[part])
+                    if part in ['genre', 'platform']:
+                        self.edit_entries[part].set(info[part])  # Combobox의 경우 set() 메서드 사용
+                    else:
+                        self.edit_entries[part].delete(0, tk.END)
+                        self.edit_entries[part].insert(0, info[part])
         else:
-            for entry in self.edit_entries.values():
-                entry.delete(0, tk.END)
-                entry.config(state="disabled")
+            # 선택 없음
+            for part in self.name_parts:
+                if part in ['genre', 'platform']:
+                    self.edit_entries[part].set('')  # Combobox의 경우 set() 메서드 사용
+                else:
+                    self.edit_entries[part].delete(0, tk.END)
 
         self.update_preview_list()
 
+    def update_preview_list(self):
+        self.preview_tree.delete(*self.preview_tree.get_children())
+        selected_items = self.item_tree.selection()
+        
+        for item in selected_items:
+            old_name = self.item_tree.item(item)['values'][0]
+            is_valid, info = validate_name(old_name)
+            if is_valid:
+                # 기본값으로 현재 정보 사용
+                display_info = info.copy()
+                
+                if len(selected_items) > 1:
+                    # 다중 선택 시 실제로 수정된 필드만 업데이트
+                    for part in self.name_parts:
+                        current_value = self.edit_entries[part].get()
+                        if current_value and current_value != "(다중 선택)":
+                            display_info[part] = current_value
+                else:
+                    # 단일 선택 시 모든 필드 업데이트
+                    for part in self.name_parts:
+                        display_info[part] = self.edit_entries[part].get()
+                
+                self.preview_tree.insert("", "end", values=(
+                    display_info['creator'],
+                    display_info['unique_id'],
+                    display_info['game_title'],
+                    display_info['genre'],
+                    display_info['platform']
+                ))
+            else:
+                self.preview_tree.insert("", "end", values=("-", "-", "-", "-", "-"))
+
     def on_column_reorder(self, event):
-        """Handle column reordering and update file names accordingly"""
-        # Get the new column order
         new_order = self.preview_tree.get_column_order()
         
-        # Create mapping between display columns and name parts
         column_to_part = {
             "Creator": "creator",
             "ID": "unique_id",
@@ -398,10 +495,7 @@ class ModernRenameWindow(tk.Toplevel):
             "Platform": "platform"
         }
         
-        # Update name_parts order based on column order
         self.name_parts = [column_to_part[col] for col in new_order]
-        
-        # Update preview list to reflect new order
         self.update_preview_list()
 
     def get_new_name(self, old_name):
@@ -410,43 +504,15 @@ class ModernRenameWindow(tk.Toplevel):
             if len(self.item_tree.selection()) == 1:
                 new_info = {part: self.edit_entries[part].get() for part in self.name_parts}
             else:
-                new_info = info
+                new_info = info.copy()
+                for part in self.name_parts:
+                    current_value = self.edit_entries[part].get()
+                    if current_value and current_value != "(다중 선택)":
+                        new_info[part] = current_value
 
-            # Use the current column order to construct the file name
-            ordered_parts = []
-            for part in self.name_parts:
-                ordered_parts.append(new_info[part])
-
+            ordered_parts = [new_info[part] for part in self.name_parts]
             return f"[{ordered_parts[0]}]-[{ordered_parts[1]}] {ordered_parts[2]} ({ordered_parts[3]})_{ordered_parts[4]}"
         return old_name
-
-    def update_preview_list(self):
-        self.preview_tree.delete(*self.preview_tree.get_children())
-        selected_items = self.item_tree.selection()
-        for item in selected_items:
-            old_name = self.item_tree.item(item)['values'][0]
-            is_valid, info = validate_name(old_name)
-            if is_valid:
-                if len(selected_items) == 1:
-                    # Use values from entry fields for single selection
-                    self.preview_tree.insert("", "end", values=(
-                        self.edit_entries['creator'].get(),
-                        self.edit_entries['unique_id'].get(),
-                        self.edit_entries['game_title'].get(),
-                        self.edit_entries['genre'].get(),
-                        self.edit_entries['platform'].get()
-                    ))
-                else:
-                    # Use original values for multiple selection
-                    self.preview_tree.insert("", "end", values=(
-                        info['creator'],
-                        info['unique_id'],
-                        info['game_title'],
-                        info['genre'],
-                        info['platform']
-                    ))
-            else:
-                self.preview_tree.insert("", "end", values=("-", "-", "-", "-", "-"))
 
     def apply_changes(self):
         selected_items = self.item_tree.selection()
