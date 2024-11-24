@@ -3,175 +3,12 @@ import os
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog, messagebox
+import requests
+from bs4 import BeautifulSoup
+import time
 
 VALID_GENRES = {'RPG', 'ACT', 'SIM', 'ADV', 'VOD', 'SHT', 'NOV', 'ANO'}
 DEFAULT_EXTENSIONS = ['.zip', '.rar', '.7z', '']
-
-class ModernUI:
-    @staticmethod
-    def setup_styles():
-        colors = {
-            'primary': '#2C3E50',
-            'secondary': '#34495E',
-            'accent': '#3498DB',
-            'success': '#2ECC71',
-            'warning': '#F1C40F',
-            'error': '#E74C3C',
-            'background': '#ECF0F1',
-            'text': '#2C3E50'
-        }
-
-        style = ttk.Style()
-        style.theme_use('clam')
-        
-        style.configure('modern.TFrame', background=colors['background'])
-        style.configure('modern.TLabelframe', background=colors['background'])
-        style.configure('modern.TLabelframe.Label', 
-                       background=colors['background'],
-                       font=('Malgun Gothic', 9, 'bold'))
-        
-        style.configure('modern.TButton',
-                       padding=10,
-                       font=('Malgun Gothic', 9))
-        
-        style.configure('modern.TEntry',
-                       padding=5,
-                       font=('Malgun Gothic', 9))
-        
-        style.configure('modern.Treeview',
-                       font=('Malgun Gothic', 9),
-                       rowheight=25)
-        style.configure('modern.Treeview.Heading',
-                       font=('Malgun Gothic', 9, 'bold'))
-
-        style.configure('modern.TCheckbutton',
-                       background=colors['background'],
-                       font=('Malgun Gothic', 9))
-        
-        return colors
-
-class ModernDraggableHeaderTreeview(ttk.Treeview):
-    def __init__(self, master, **kw):
-        super().__init__(master, **kw)
-        self.drag_data = None
-        self.ghost_window = None
-        self.ghost_label = None
-        
-        # Bind events to the header
-        self.bind('<Button-1>', self.start_drag)
-        self.bind('<B1-Motion>', self.drag)
-        self.bind('<ButtonRelease-1>', self.stop_drag)
-        
-        # Keep track of column order
-        self.column_order = list(self['columns'])
-
-    def create_ghost_window(self, text):
-        self.ghost_window = tk.Toplevel(self)
-        self.ghost_window.overrideredirect(True)
-        self.ghost_window.attributes('-alpha', 0.7)
-        
-        self.ghost_label = tk.Label(
-            self.ghost_window,
-            text=text,
-            bg='#2C3E50',
-            fg='white',
-            relief='solid',
-            borderwidth=1,
-            pady=2,
-            padx=5,
-            font=('Malgun Gothic', 9)
-        )
-        self.ghost_label.pack()
-        
-        self.ghost_window.withdraw()
-        self.ghost_label.update_idletasks()
-        width = self.ghost_label.winfo_reqwidth()
-        height = self.ghost_label.winfo_reqheight()
-        self.ghost_window.geometry(f"{width}x{height}")
-
-    def start_drag(self, event):
-        region = self.identify_region(event.x, event.y)
-        if region != "heading":
-            return
-            
-        column = self.identify_column(event.x)
-        if not column:
-            return
-            
-        # Get column index
-        column_index = int(column[1]) - 1
-        if column_index < 0 or column_index >= len(self.column_order):
-            return
-            
-        column_name = self.column_order[column_index]
-        heading_text = self.heading(column_name)['text']
-        
-        self.drag_data = {
-            'column': column_name,
-            'text': heading_text,
-            'x': event.x_root,
-            'y': event.y_root,
-            'index': column_index,
-            'start_x': event.x
-        }
-        
-        self.create_ghost_window(heading_text)
-        self.ghost_window.geometry(f"+{event.x_root}+{event.y_root}")
-        self.ghost_window.deiconify()
-
-    def drag(self, event):
-        if not self.drag_data:
-            return
-            
-        x_offset = event.x_root - self.drag_data['x']
-        y_offset = event.y_root - self.drag_data['y']
-        
-        new_x = self.drag_data['x'] + x_offset
-        new_y = self.drag_data['y'] + y_offset
-        
-        if self.ghost_window:
-            self.ghost_window.geometry(f"+{new_x}+{new_y}")
-        
-        target_column = self.identify_column(event.x)
-        if target_column:
-            target_index = int(target_column[1]) - 1
-            if target_index >= 0 and target_index < len(self.column_order):
-                current_index = self.drag_data['index']
-                if target_index != current_index:
-                    # 드래그 거리 계산
-                    drag_distance = abs(event.x - self.drag_data['start_x'])
-                    
-                    # 컬럼 너비의 절반 이상 이동했을 때만 위치 변경
-                    min_move = self.column(self.column_order[target_index], "width") // 2
-                    
-                    if drag_distance > min_move:
-                        # 위치 전환
-                        column = self.column_order.pop(current_index)
-                        self.column_order.insert(target_index, column)
-                        
-                        # 컬럼 표시 순서 업데이트
-                        self['displaycolumns'] = self.column_order
-                        
-                        # 드래그 시작 위치 업데이트
-                        self.drag_data['index'] = target_index
-                        self.drag_data['start_x'] = event.x
-                        
-                        self.event_generate('<<TreeviewColumnReordered>>')
-
-    def stop_drag(self, event):
-        if self.ghost_window:
-            self.ghost_window.destroy()
-            self.ghost_window = None
-            self.ghost_label = None
-        
-        self.drag_data = None
-
-    def get_column_order(self):
-        return self.column_order
-
-    def on_destroy(self):
-        if self.ghost_window:
-            self.ghost_window.destroy()
 
 def validate_name(name):
     patterns = [
@@ -240,6 +77,173 @@ def classify_items(items):
     
     return valid_items, invalid_items, duplicate_items
 
+class ModernUI:
+    @staticmethod
+    def setup_styles():
+        colors = {
+            'primary': '#2C3E50',
+            'secondary': '#34495E',
+            'accent': '#3498DB',
+            'success': '#2ECC71',
+            'warning': '#F1C40F',
+            'error': '#E74C3C',
+            'background': '#ECF0F1',
+            'text': '#2C3E50'
+        }
+
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        style.configure('modern.TFrame', background=colors['background'])
+        style.configure('modern.TLabelframe', background=colors['background'])
+        style.configure('modern.TLabelframe.Label', 
+                       background=colors['background'],
+                       font=('Malgun Gothic', 9, 'bold'))
+        
+        style.configure('modern.TButton',
+                       padding=10,
+                       font=('Malgun Gothic', 9))
+        
+        style.configure('modern.TEntry',
+                       padding=5,
+                       font=('Malgun Gothic', 9))
+        
+        style.configure('modern.Treeview',
+                       font=('Malgun Gothic', 9),
+                       rowheight=25)
+        style.configure('modern.Treeview.Heading',
+                       font=('Malgun Gothic', 9, 'bold'))
+
+        style.configure('modern.TCheckbutton',
+                       background=colors['background'],
+                       font=('Malgun Gothic', 9))
+        
+        # Notebook styles
+        style.configure('modern.TNotebook', 
+                       background=colors['background'])
+        style.configure('modern.TNotebook.Tab',
+                       padding=[10, 5],
+                       font=('Malgun Gothic', 9))
+        
+        style.map('modern.TNotebook.Tab',
+                 background=[('selected', colors['accent']),
+                            ('!selected', colors['secondary'])],
+                 foreground=[('selected', 'white'),
+                            ('!selected', 'white')])
+        
+        return colors
+
+class ModernDraggableHeaderTreeview(ttk.Treeview):
+    def __init__(self, master, **kw):
+        super().__init__(master, **kw)
+        self.drag_data = None
+        self.ghost_window = None
+        self.ghost_label = None
+        
+        self.bind('<Button-1>', self.start_drag)
+        self.bind('<B1-Motion>', self.drag)
+        self.bind('<ButtonRelease-1>', self.stop_drag)
+        
+        self.column_order = list(self['columns'])
+
+    def create_ghost_window(self, text):
+        self.ghost_window = tk.Toplevel(self)
+        self.ghost_window.overrideredirect(True)
+        self.ghost_window.attributes('-alpha', 0.7)
+        
+        self.ghost_label = tk.Label(
+            self.ghost_window,
+            text=text,
+            bg='#2C3E50',
+            fg='white',
+            relief='solid',
+            borderwidth=1,
+            pady=2,
+            padx=5,
+            font=('Malgun Gothic', 9)
+        )
+        self.ghost_label.pack()
+        
+        self.ghost_window.withdraw()
+        self.ghost_label.update_idletasks()
+        width = self.ghost_label.winfo_reqwidth()
+        height = self.ghost_label.winfo_reqheight()
+        self.ghost_window.geometry(f"{width}x{height}")
+
+    def start_drag(self, event):
+        region = self.identify_region(event.x, event.y)
+        if region != "heading":
+            return
+            
+        column = self.identify_column(event.x)
+        if not column:
+            return
+            
+        column_index = int(column[1]) - 1
+        if column_index < 0 or column_index >= len(self.column_order):
+            return
+            
+        column_name = self.column_order[column_index]
+        heading_text = self.heading(column_name)['text']
+        
+        self.drag_data = {
+            'column': column_name,
+            'text': heading_text,
+            'x': event.x_root,
+            'y': event.y_root,
+            'index': column_index,
+            'start_x': event.x
+        }
+        
+        self.create_ghost_window(heading_text)
+        self.ghost_window.geometry(f"+{event.x_root}+{event.y_root}")
+        self.ghost_window.deiconify()
+
+    def drag(self, event):
+        if not self.drag_data:
+            return
+            
+        x_offset = event.x_root - self.drag_data['x']
+        y_offset = event.y_root - self.drag_data['y']
+        
+        new_x = self.drag_data['x'] + x_offset
+        new_y = self.drag_data['y'] + y_offset
+        
+        if self.ghost_window:
+            self.ghost_window.geometry(f"+{new_x}+{new_y}")
+        
+        target_column = self.identify_column(event.x)
+        if target_column:
+            target_index = int(target_column[1]) - 1
+            if target_index >= 0 and target_index < len(self.column_order):
+                current_index = self.drag_data['index']
+                if target_index != current_index:
+                    drag_distance = abs(event.x - self.drag_data['start_x'])
+                    min_move = self.column(self.column_order[target_index], "width") // 2
+                    
+                    if drag_distance > min_move:
+                        column = self.column_order.pop(current_index)
+                        self.column_order.insert(target_index, column)
+                        self['displaycolumns'] = self.column_order
+                        self.drag_data['index'] = target_index
+                        self.drag_data['start_x'] = event.x
+                        self.event_generate('<<TreeviewColumnReordered>>')
+
+    def stop_drag(self, event):
+        if self.ghost_window:
+            self.ghost_window.destroy()
+            self.ghost_window = None
+            self.ghost_label = None
+        
+        self.drag_data = None
+
+    def get_column_order(self):
+        return self.column_order
+
+    def on_destroy(self):
+        if self.ghost_window:
+            self.ghost_window.destroy()
+
 class ModernRenameWindow(tk.Toplevel):
     def __init__(self, parent, selected_items, path, callback):
         super().__init__(parent)
@@ -261,7 +265,6 @@ class ModernRenameWindow(tk.Toplevel):
         self.callback = callback
         self.colors = ModernUI.setup_styles()
 
-        # 드롭다운에 사용할 값들 정의
         self.valid_genres = sorted(list(VALID_GENRES))
         self.valid_platforms = ['DLsite', 'VNdb', 'Getchu', 'Fanza', 'Steam']
 
@@ -307,15 +310,36 @@ class ModernRenameWindow(tk.Toplevel):
         list_frame.grid_rowconfigure(0, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
 
-        self.item_tree = ttk.Treeview(list_frame, columns=("Item",), 
-                                    show="headings", style='modern.Treeview')
-        self.item_tree.heading("Item", text="이름")
-        self.item_tree.grid(row=0, column=0, sticky="nsew")
+        # Container for treeview and scrollbars
+        container = ttk.Frame(list_frame)
+        container.grid(sticky="nsew")
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)
 
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", 
-                                command=self.item_tree.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.item_tree.configure(yscrollcommand=scrollbar.set)
+        # Create scrollbars
+        y_scroll = ttk.Scrollbar(container, orient="vertical")
+        x_scroll = ttk.Scrollbar(container, orient="horizontal")
+
+        self.item_tree = ttk.Treeview(
+            container,
+            columns=("Item",),
+            show="headings",
+            style='modern.Treeview',
+            yscrollcommand=y_scroll.set,
+            xscrollcommand=x_scroll.set
+        )
+
+        # Configure scrollbars
+        y_scroll.config(command=self.item_tree.yview)
+        x_scroll.config(command=self.item_tree.xview)
+
+        self.item_tree.heading("Item", text="이름")
+        self.item_tree.column("Item", width=300)  # Set minimum width
+
+        # Grid layout
+        self.item_tree.grid(row=0, column=0, sticky="nsew")
+        y_scroll.grid(row=0, column=1, sticky="ns")
+        x_scroll.grid(row=1, column=0, sticky="ew")
 
         for item in self.selected_items:
             self.item_tree.insert("", "end", values=(item,))
@@ -326,24 +350,20 @@ class ModernRenameWindow(tk.Toplevel):
         edit_frame = ttk.Frame(parent, style='modern.TFrame', padding=10)
         edit_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         
-        # 제목 레이블
         title_label = ttk.Label(edit_frame, 
                             text="항목 편집",
                             font=('Malgun Gothic', 10, 'bold'),
                             background=self.colors['background'])
         title_label.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
         
-        # 내용을 담을 내부 프레임
         content_frame = ttk.Frame(edit_frame, style='modern.TFrame')
         content_frame.grid(row=1, column=0, sticky="ew")
         content_frame.grid_columnconfigure(1, weight=1)
         
         for i, part in enumerate(self.name_parts):
-            # Frame for each row
             row_frame = ttk.Frame(content_frame, style='modern.TFrame')
             row_frame.grid(row=i, column=0, columnspan=2, sticky="ew", pady=5)
             
-            # 레이블
             label = ttk.Label(
                 row_frame, 
                 text=f"{self.name_parts_korean[part]}:",
@@ -352,7 +372,6 @@ class ModernRenameWindow(tk.Toplevel):
             )
             label.grid(row=0, column=0, sticky="w", padx=(0, 10))
             
-            # Entry 또는 Combobox 생성
             if part == 'genre':
                 entry = ttk.Combobox(row_frame, 
                                    values=self.valid_genres,
@@ -382,87 +401,366 @@ class ModernRenameWindow(tk.Toplevel):
         preview_frame.grid_rowconfigure(0, weight=1)
         preview_frame.grid_columnconfigure(0, weight=1)
 
-        self.preview_tree = ModernDraggableHeaderTreeview(
-            preview_frame,
+        # Create notebook (tab control)
+        self.preview_notebook = ttk.Notebook(preview_frame, style='modern.TNotebook')
+        self.preview_notebook.grid(row=0, column=0, sticky="nsew")
+
+        # 현재 이름 탭
+        current_tab = ttk.Frame(self.preview_notebook, style='modern.TFrame')
+        self.preview_notebook.add(current_tab, text="현재 이름")
+
+        # 새 이름 탭
+        new_name_tab = ttk.Frame(self.preview_notebook, style='modern.TFrame')
+        self.preview_notebook.add(new_name_tab, text="새 이름")
+
+        # 크롤링 결과 탭
+        crawling_tab = ttk.Frame(self.preview_notebook, style='modern.TFrame')
+        self.preview_notebook.add(crawling_tab, text="크롤링 결과")
+
+        # Current name tab
+        current_container = ttk.Frame(current_tab)
+        current_container.grid(row=0, column=0, sticky="nsew")
+        current_container.grid_rowconfigure(0, weight=1)
+        current_container.grid_columnconfigure(0, weight=1)
+
+        current_y_scroll = ttk.Scrollbar(current_container, orient="vertical")
+        current_x_scroll = ttk.Scrollbar(current_container, orient="horizontal")
+
+        self.current_tree = ModernDraggableHeaderTreeview(
+            current_container,
             columns=("Creator", "ID", "Title", "Genre", "Platform"),
             show="headings",
-            style='modern.Treeview'
+            style='modern.Treeview',
+            yscrollcommand=current_y_scroll.set,
+            xscrollcommand=current_x_scroll.set
         )
 
+        current_y_scroll.config(command=self.current_tree.yview)
+        current_x_scroll.config(command=self.current_tree.xview)
+
         column_names = {
-            "Creator": "제작자",
-            "ID": "고유 ID",
-            "Title": "게임 제목",
-            "Genre": "장르",
-            "Platform": "플랫폼"
+            "Creator": ("제작자", 150),
+            "ID": ("고유 ID", 100),
+            "Title": ("게임 제목", 400),
+            "Genre": ("장르", 100),
+            "Platform": ("플랫폼", 100)
         }
 
-        for col, text in column_names.items():
-            self.preview_tree.heading(col, text=text)
-            self.preview_tree.column(col, width=100)
-        
-        self.preview_tree.column("Title", width=400)
-        self.preview_tree.grid(row=0, column=0, sticky="nsew")
+        for col, (text, width) in column_names.items():
+            self.current_tree.heading(col, text=text)
+            self.current_tree.column(col, width=width, minwidth=50)
 
-        scrollbar = ttk.Scrollbar(preview_frame, orient="vertical",
-                               command=self.preview_tree.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.preview_tree.configure(yscrollcommand=scrollbar.set)
-        
-        self.preview_tree.bind('<<TreeviewColumnReordered>>', self.on_column_reorder)
+        self.current_tree.grid(row=0, column=0, sticky="nsew")
+        current_y_scroll.grid(row=0, column=1, sticky="ns")
+        current_x_scroll.grid(row=1, column=0, sticky="ew")
+
+        # New name tab
+        new_container = ttk.Frame(new_name_tab)
+        new_container.grid(row=0, column=0, sticky="nsew")
+        new_container.grid_rowconfigure(0, weight=1)
+        new_container.grid_columnconfigure(0, weight=1)
+
+        new_y_scroll = ttk.Scrollbar(new_container, orient="vertical")
+        new_x_scroll = ttk.Scrollbar(new_container, orient="horizontal")
+
+        self.new_tree = ModernDraggableHeaderTreeview(
+            new_container,
+            columns=("Creator", "ID", "Title", "Genre", "Platform"),
+            show="headings",
+            style='modern.Treeview',
+            yscrollcommand=new_y_scroll.set,
+            xscrollcommand=new_x_scroll.set
+        )
+
+        new_y_scroll.config(command=self.new_tree.yview)
+        new_x_scroll.config(command=self.new_tree.xview)
+
+        for col, (text, width) in column_names.items():
+            self.new_tree.heading(col, text=text)
+            self.new_tree.column(col, width=width, minwidth=50)
+
+        self.new_tree.grid(row=0, column=0, sticky="nsew")
+        new_y_scroll.grid(row=0, column=1, sticky="ns")
+        new_x_scroll.grid(row=1, column=0, sticky="ew")
+
+        # Crawling results tab
+        crawling_container = ttk.Frame(crawling_tab)
+        crawling_container.grid(row=0, column=0, sticky="nsew")
+        crawling_container.grid_rowconfigure(0, weight=1)
+        crawling_container.grid_columnconfigure(0, weight=1)
+
+        crawl_y_scroll = ttk.Scrollbar(crawling_container, orient="vertical")
+        crawl_x_scroll = ttk.Scrollbar(crawling_container, orient="horizontal")
+
+        self.crawl_tree = ModernDraggableHeaderTreeview(
+            crawling_container,
+            columns=("Platform", "Title", "Creator", "ID", "Genre", "ReleaseDate", "FileSize", "Version", "Tags", "Confidence"),
+            show="headings",
+            style='modern.Treeview',
+            yscrollcommand=crawl_y_scroll.set,
+            xscrollcommand=crawl_x_scroll.set
+        )
+
+        crawl_y_scroll.config(command=self.crawl_tree.yview)
+        crawl_x_scroll.config(command=self.crawl_tree.xview)
+
+        crawl_columns = {
+            "Platform": ("플랫폼", 100),
+            "Title": ("게임 제목", 300),
+            "Creator": ("제작자", 150),
+            "ID": ("고유 ID", 100),
+            "Genre": ("장르", 100),
+            "ReleaseDate": ("발매일", 100),
+            "FileSize": ("용량", 100),
+            "Version": ("버전", 100),
+            "Tags": ("태그", 300),
+            "Confidence": ("일치도", 100)
+        }
+
+        for col, (text, width) in crawl_columns.items():
+            self.crawl_tree.heading(col, text=text)
+            self.crawl_tree.column(col, width=width, minwidth=50)
+
+        self.crawl_tree.grid(row=0, column=0, sticky="nsew")
+        crawl_y_scroll.grid(row=0, column=1, sticky="ns")
+        crawl_x_scroll.grid(row=1, column=0, sticky="ew")
+
+        # Configure grid for all tabs
+        for tab in [current_tab, new_name_tab, crawling_tab]:
+            tab.grid_rowconfigure(0, weight=1)
+            tab.grid_columnconfigure(0, weight=1)
 
     def create_button_frame(self, parent):
         button_frame = ttk.Frame(parent, style='modern.TFrame')
         button_frame.grid(row=2, column=0, sticky="ew", pady=(0, 10))
 
+        # 변경 적용 버튼
         ttk.Button(button_frame, 
                   text="변경 적용",
                   style='modern.TButton',
-                  command=self.apply_changes).grid(row=0, column=0, sticky="w")
+                  command=self.apply_changes).grid(row=0, column=0, sticky="w", padx=(0, 10))
+        
+        # 크롤링 버튼 추가
+        ttk.Button(button_frame,
+                  text="웹 정보 가져오기",
+                  style='modern.TButton',
+                  command=self.crawl_info).grid(row=0, column=1, sticky="w")
 
-    def on_item_select(self, event):
+    def fetch_product_info(self, product_id):
+        base_url = "https://www.dlsite.com/maniax/work/=/product_id/"
+        locale = "/?locale=ko_KR"
+        url = f"{base_url}{product_id}{locale}"
+        
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            return None
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        def get_tag_text(tag, default='N/A'):
+            return tag.get_text(strip=True) if tag else default
+        
+        # 게임 제목
+        title_tag = soup.find('h1', itemprop='name', id='work_name')
+        title = get_tag_text(title_tag)
+        
+        # 서클명
+        try:
+            circle_tag = soup.find('span', itemprop='brand', class_='maker_name').find('a')
+            circle_name = get_tag_text(circle_tag)
+        except:
+            circle_name = 'N/A'
+
+        # 장르
+        genre_tags = soup.find('th', string='장르')
+        if genre_tags:
+            genre_tags = genre_tags.find_next_sibling('td').find_all('a')
+        genres = [get_tag_text(genre) for genre in genre_tags] if genre_tags else []
+
+        # 판매일
+        sales_date_tag = soup.find('th', string='판매일')
+        if sales_date_tag:
+            sales_date_tag = sales_date_tag.find_next_sibling('td').find('a')
+        sales_date = get_tag_text(sales_date_tag)
+
+        # 파일 용량
+        file_size_tag = soup.find('th', string='파일 용량')
+        if file_size_tag:
+            file_size_tag = file_size_tag.find_next_sibling('td').find('div', class_='main_genre')
+        file_size = get_tag_text(file_size_tag)
+        
+        # 파일 용량 변환
+        try:
+            size_str = re.sub(r'[^\d.]', '', file_size)
+            size_num = float(size_str)
+            if 'MB' in file_size:
+                file_size = size_num
+            elif 'GB' in file_size:
+                file_size = size_num * 1024
+            else:
+                file_size = 'Unknown'
+        except:
+            file_size = 'Unknown'
+
+        # 버전 정보
+        btn_ver_up_tag = soup.find('div', class_='btn_ver_up')
+
+        # 일치도 계산
+        confidence = 0
+        if title != 'N/A':
+            confidence += 40
+        if circle_name != 'N/A':
+            confidence += 30
+        if genres:
+            confidence += 30
+            
+        # DLsite의 장르를 프로그램의 장르로 매핑
+        genre_mapping = {
+            'アドベンチャー': 'ADV',
+            'ロールプレイング': 'RPG',
+            'シミュレーション': 'SIM',
+            'アクション': 'ACT',
+            '音声作品': 'VOD',
+            'シューティング': 'SHT',
+            'ノベル': 'NOV',
+            'その他ゲーム': 'ANO'
+        }
+        
+        mapped_genres = []
+        for genre in genres:
+            if genre in genre_mapping:
+                mapped_genres.append(genre_mapping[genre])
+        
+        primary_genre = mapped_genres[0] if mapped_genres else 'ANO'
+
+        return {
+            'Platform': 'DLsite',
+            'Title': title,
+            'Creator': circle_name,
+            'ID': product_id,
+            'Genre': primary_genre,
+            'ReleaseDate': sales_date,
+            'FileSize': f"{file_size:,.0f}MB" if isinstance(file_size, (int, float)) else file_size,
+            'Version': '업데이트 있음' if btn_ver_up_tag else '최신 버전',
+            'Tags': ", ".join(genres),
+            'Confidence': f"{confidence}%"
+        }
+
+    def crawl_info(self):
         selected_items = self.item_tree.selection()
-        if len(selected_items) > 1:
-            # 다중 선택 시
-            for part in self.name_parts:
-                if part in ['genre', 'platform']:
-                    self.edit_entries[part].set('')  # Combobox의 경우 set() 메서드 사용
-                else:
-                    self.edit_entries[part].delete(0, tk.END)
-                    self.edit_entries[part].insert(0, "(다중 선택)")
-
-        elif len(selected_items) == 1:
-            # 단일 선택 시
-            item = self.item_tree.item(selected_items[0])['values'][0]
-            is_valid, info = validate_name(item)
-            if is_valid:
-                for part in self.name_parts:
-                    if part in ['genre', 'platform']:
-                        self.edit_entries[part].set(info[part])  # Combobox의 경우 set() 메서드 사용
+        if not selected_items:
+            messagebox.showwarning("경고", "크롤링할 항목을 선택해주세요.")
+            return
+        
+        # 진행 상황을 보여주는 프로그레스 창 생성
+        progress_window = tk.Toplevel(self)
+        progress_window.title("크롤링 진행 중")
+        
+        # 화면 중앙에 위치
+        window_width = 300
+        window_height = 100
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        center_x = int(screen_width/2 - window_width/2)
+        center_y = int(screen_height/2 - window_height/2)
+        progress_window.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
+        
+        # 진행 상황 라벨
+        progress_label = ttk.Label(
+            progress_window, 
+            text="크롤링 진행 중...", 
+            font=('Malgun Gothic', 9),
+            background=self.colors['background']
+        )
+        progress_label.pack(pady=10)
+        
+        # 프로그레스 바
+        progress_bar = ttk.Progressbar(
+            progress_window, 
+            mode='determinate',
+            length=200
+        )
+        progress_bar.pack(pady=10)
+        
+        # 크롤링 결과 트리 초기화
+        self.crawl_tree.delete(*self.crawl_tree.get_children())
+        
+        total_items = len(selected_items)
+        progress_bar['maximum'] = total_items
+        
+        def process_items():
+            for i, item in enumerate(selected_items, 1):
+                old_name = self.item_tree.item(item)['values'][0]
+                is_valid, info = validate_name(old_name)
+                
+                # 진행 상황 업데이트
+                progress_label['text'] = f"크롤링 진행 중... ({i}/{total_items})"
+                progress_bar['value'] = i
+                
+                if is_valid and info['platform'] == 'DLsite':
+                    crawled_info = self.fetch_product_info(info['unique_id'])
+                    if crawled_info:
+                        self.crawl_tree.insert("", "end", values=(
+                            crawled_info['Platform'],
+                            crawled_info['Title'],
+                            crawled_info['Creator'],
+                            crawled_info['ID'],
+                            crawled_info['Genre'],
+                            crawled_info['ReleaseDate'],
+                            crawled_info['FileSize'],
+                            crawled_info['Version'],
+                            crawled_info['Tags'],
+                            crawled_info['Confidence']
+                        ))
                     else:
-                        self.edit_entries[part].delete(0, tk.END)
-                        self.edit_entries[part].insert(0, info[part])
-        else:
-            # 선택 없음
-            for part in self.name_parts:
-                if part in ['genre', 'platform']:
-                    self.edit_entries[part].set('')  # Combobox의 경우 set() 메서드 사용
+                        self.crawl_tree.insert("", "end", values=(
+                            'DLsite', '조회 실패', '-', info['unique_id'], '-', '-', '-', '-', '-', '0%'
+                        ))
                 else:
-                    self.edit_entries[part].delete(0, tk.END)
-
-        self.update_preview_list()
+                    self.crawl_tree.insert("", "end", values=(
+                        'DLsite', '유효하지 않은 이름', '-', '-', '-', '-', '-', '-', '-', '0%'
+                    ))
+                
+                # 각 아이템 처리 후 1초 대기
+                time.sleep(1)
+                
+                # GUI 업데이트
+                self.update()
+            
+            # 크롤링 완료 후
+            progress_window.destroy()
+            self.preview_notebook.select(2)  # 크롤링 결과 탭으로 전환
+            messagebox.showinfo("완료", "크롤링이 완료되었습니다.")
+        
+        # 별도 스레드에서 실행하지 않고 메인 스레드에서 처리
+        # (tkinter는 스레드에 안전하지 않음)
+        self.after(100, process_items)
 
     def update_preview_list(self):
-        self.preview_tree.delete(*self.preview_tree.get_children())
+        # Clear all trees
+        self.current_tree.delete(*self.current_tree.get_children())
+        self.new_tree.delete(*self.new_tree.get_children())
+        
         selected_items = self.item_tree.selection()
         
         for item in selected_items:
             old_name = self.item_tree.item(item)['values'][0]
             is_valid, info = validate_name(old_name)
+            
             if is_valid:
-                # 기본값으로 현재 정보 사용
+                # 현재 이름 트리에 추가
+                self.current_tree.insert("", "end", values=(
+                    info['creator'],
+                    info['unique_id'],
+                    info['game_title'],
+                    info['genre'],
+                    info['platform']
+                ))
+
+                # 새 이름 트리 업데이트
                 display_info = info.copy()
-                
                 if len(selected_items) > 1:
                     # 다중 선택 시 실제로 수정된 필드만 업데이트
                     for part in self.name_parts:
@@ -474,7 +772,8 @@ class ModernRenameWindow(tk.Toplevel):
                     for part in self.name_parts:
                         display_info[part] = self.edit_entries[part].get()
                 
-                self.preview_tree.insert("", "end", values=(
+                # 새 이름 트리에 추가
+                self.new_tree.insert("", "end", values=(
                     display_info['creator'],
                     display_info['unique_id'],
                     display_info['game_title'],
@@ -482,20 +781,40 @@ class ModernRenameWindow(tk.Toplevel):
                     display_info['platform']
                 ))
             else:
-                self.preview_tree.insert("", "end", values=("-", "-", "-", "-", "-"))
+                # 유효하지 않은 항목의 경우 빈 값으로 표시
+                empty_values = ("-", "-", "-", "-", "-")
+                self.current_tree.insert("", "end", values=empty_values)
+                self.new_tree.insert("", "end", values=empty_values)
 
-    def on_column_reorder(self, event):
-        new_order = self.preview_tree.get_column_order()
-        
-        column_to_part = {
-            "Creator": "creator",
-            "ID": "unique_id",
-            "Title": "game_title",
-            "Genre": "genre",
-            "Platform": "platform"
-        }
-        
-        self.name_parts = [column_to_part[col] for col in new_order]
+    def on_item_select(self, event):
+        selected_items = self.item_tree.selection()
+        if len(selected_items) > 1:
+            # 다중 선택 시
+            for part in self.name_parts:
+                if part in ['genre', 'platform']:
+                    self.edit_entries[part].set('')  # Combobox의 경우 set() 메서드 사용
+                else:
+                    self.edit_entries[part].delete(0, tk.END)
+                    self.edit_entries[part].insert(0, "(다중 선택)")
+        elif len(selected_items) == 1:
+            # 단일 선택 시
+            item = self.item_tree.item(selected_items[0])['values'][0]
+            is_valid, info = validate_name(item)
+            if is_valid:
+                for part in self.name_parts:
+                    if part in ['genre', 'platform']:
+                        self.edit_entries[part].set(info[part])
+                    else:
+                        self.edit_entries[part].delete(0, tk.END)
+                        self.edit_entries[part].insert(0, info[part])
+        else:
+            # 선택 없음
+            for part in self.name_parts:
+                if part in ['genre', 'platform']:
+                    self.edit_entries[part].set('')
+                else:
+                    self.edit_entries[part].delete(0, tk.END)
+
         self.update_preview_list()
 
     def get_new_name(self, old_name):
@@ -641,11 +960,31 @@ class ModernGameItemValidatorApp:
         tree_frame = ttk.Frame(parent, style='modern.TFrame')
         tree_frame.pack(fill="both", expand=True, pady=(0, 10))
 
-        self.result_tree = ttk.Treeview(tree_frame,
-                                    columns=("Item", "Status", "Platform", "Genre", "ID"),
-                                    show="headings",
-                                    style='modern.Treeview')
+        # 트리뷰 컨테이너 생성
+        container = ttk.Frame(tree_frame)
+        container.pack(fill="both", expand=True)
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)
 
+        # 스크롤바 생성
+        y_scroll = ttk.Scrollbar(container, orient="vertical")
+        x_scroll = ttk.Scrollbar(container, orient="horizontal")
+
+        # 트리뷰 생성 및 스크롤바 연결
+        self.result_tree = ttk.Treeview(
+            container,
+            columns=("Item", "Status", "Platform", "Genre", "ID"),
+            show="headings",
+            style='modern.Treeview',
+            yscrollcommand=y_scroll.set,
+            xscrollcommand=x_scroll.set
+        )
+
+        # 스크롤바 설정
+        y_scroll.config(command=self.result_tree.yview)
+        x_scroll.config(command=self.result_tree.xview)
+
+        # 컬럼 설정
         self.result_tree.heading("Item", text="파일/폴더명",
                              command=lambda: self.treeview_sort_column("Item", False))
         self.result_tree.heading("Status", text="상태",
@@ -657,32 +996,31 @@ class ModernGameItemValidatorApp:
         self.result_tree.heading("ID", text="고유 ID",
                              command=lambda: self.treeview_sort_column("ID", False))
 
-        self.result_tree.column("Item", width=500)
-        self.result_tree.column("Status", width=100)
-        self.result_tree.column("Platform", width=100)
-        self.result_tree.column("Genre", width=100)
-        self.result_tree.column("ID", width=100)
+        # 컬럼 너비 설정
+        self.result_tree.column("Item", width=500, minwidth=200)
+        self.result_tree.column("Status", width=100, minwidth=80)
+        self.result_tree.column("Platform", width=100, minwidth=80)
+        self.result_tree.column("Genre", width=100, minwidth=80)
+        self.result_tree.column("ID", width=100, minwidth=80)
 
+        # 태그 설정
         self.result_tree.tag_configure("valid", background=self.colors['success'])
         self.result_tree.tag_configure("invalid", background=self.colors['error'])
         self.result_tree.tag_configure("duplicate", background=self.colors['warning'])
 
-        scrollbar = ttk.Scrollbar(tree_frame,
-                              orient="vertical",
-                              command=self.result_tree.yview)
-        scrollbar.pack(side="right", fill="y")
-        self.result_tree.configure(yscrollcommand=scrollbar.set)
-        self.result_tree.pack(side="left", fill="both", expand=True)
+        # 그리드 배치
+        self.result_tree.grid(row=0, column=0, sticky="nsew")
+        y_scroll.grid(row=0, column=1, sticky="ns")
+        x_scroll.grid(row=1, column=0, sticky="ew")
 
     def create_action_buttons(self, parent):
         button_frame = ttk.Frame(parent, style='modern.TFrame')
         button_frame.pack(fill="x", pady=(0, 10))
 
-        rename_button = ttk.Button(button_frame,
-                               text="선택 항목 이름 변경",
-                               style='modern.TButton',
-                               command=self.open_rename_window)
-        rename_button.pack(side="left")
+        ttk.Button(button_frame,
+                  text="선택 항목 이름 변경",
+                  style='modern.TButton',
+                  command=self.open_rename_window).pack(side="left")
 
     def browse_folder(self):
         folder_path = filedialog.askdirectory()
